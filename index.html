@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Aircraft Landing Distance Calculator</title>
+    <script src="https://unpkg.com/vue"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        select, input, button {
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+        }
+
+        canvas {
+            margin: 20px 0;
+            border: 1px solid black;
+            display: block;
+        }
+
+        .small-input {
+            width: 120px;
+        }
+
+        .flex-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .flex-item {
+            flex-grow: 1;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            font-weight: bold;
+        }
+
+        .wind-info {
+            font-size: 18px;
+            margin-top: 20px;
+        }
+
+        .wind-info span {
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+<div id="app" class="container">
+    <h2>Aircraft Landing Distance Calculator</h2>
+
+    <!-- Aircraft Selection -->
+    <div class="input-group">
+        <label for="aircraft">Select Aircraft:</label>
+        <select v-model="selectedAircraft">
+            <option v-for="aircraft in aircrafts" :key="aircraft.id" :value="aircraft"
+                    :disabled="aircraft.type !== 'DR40'">{{ aircraft.name }}
+            </option>
+        </select>
+    </div>
+
+
+    <!-- Airport Input -->
+    <div class="input-group">
+        <label for="airport">Enter Airport ICAO Code:</label>
+        <input v-model="airportCode" placeholder="ICAO" @blur="fetchAirportData">
+    </div>
+
+    <div class="input-group" v-if="runways.length > 0">
+        <label for="airport">Field elevation (ft):</label>
+        <input v-model="fieldElevation" placeholder="ft" @blur="dataChange()">
+    </div>
+
+    <!-- Runways Display -->
+    <div class="input-group" v-if="runways.length > 0">
+        <label for="runway">Select Runway:</label>
+        <select v-model="selectedRunway" class="flex-item" @change="setRunwayType()" @blur="dataChange()">
+            <option v-for="runway in runways" :key="runway.id" :value="runway">{{ runway.ident }} -
+                {{ (runway.length_ft * 0.3048).toFixed(2) }} m
+            </option>
+        </select>
+
+        <!-- Runway Type -->
+        <label for="runwayType">Runway Type:</label>
+        <select v-model="runwayType" class="flex-item" @blur="dataChange()">
+            <option value="ASP">Asphalt</option>
+            <option value="BIT">Bituminous asphalt or tarmac</option>
+            <option value="COM">Composite</option>
+            <option value="CON">Concrete</option>
+            <option value="COP">Composite</option>
+            <option value="GRE">Graded or rolled earth, grass on graded earth</option>
+            <option value="GRS">Grass or earth not graded or rolled</option>
+            <option value="grass">Grass</option>
+            <option value="GVL">Gravel</option>
+            <option value="SAN">Sand</option>
+        </select>
+
+        <!-- Runway Condition -->
+        <label for="runwayCondition">Runway Condition:</label>
+        <select v-model="runwayCondition" class="flex-item" @blur="dataChange()">
+            <option value="dry">Dry</option>
+            <option value="wet">Wet</option>
+        </select>
+    </div>
+
+    <!-- METAR Weather Info and Editable Fields -->
+    <div class="input-group" v-if="metar">
+        <label>METAR Weather Information:</label>
+        <div class="flex-container">
+            <div class="flex-item">
+                <label>Wind Direction (°)</label>
+                <input v-model.number="editableMetar.wind_direction" type="number" @blur="dataChange()">
+            </div>
+            <div class="flex-item">
+                <label>Wind Speed (kt)</label>
+                <input v-model.number="editableMetar.wind_speed" type="number" @blur="dataChange()">
+            </div>
+            <div class="flex-item">
+                <label>Temperature (°C)</label>
+                <input v-model.number="editableMetar.temperature" type="number" @blur="dataChange()">
+            </div>
+            <div class="flex-item">
+                <label>Dewpoint (°C)</label>
+                <input v-model.number="editableMetar.dewpoint" type="number" @blur="dataChange()">
+            </div>
+            <div class="flex-item">
+                <label>Pressure (hPa)</label>
+                <input v-model.number="editableMetar.pressure" type="number" @blur="dataChange()">
+            </div>
+        </div>
+        <button v-if="selectedRunway && !meteoCalculated" @click="calculateMeteo">Continue</button>
+    </div>
+
+    <!-- Density Altitude and ISA Deviation -->
+    <div class="input-group" v-if="meteoCalculated">
+        <h4>Calculations:</h4>
+        <p>Density Altitude: {{ densityAltitude }} ft</p>
+        <p>Pressure Altitude: {{ pressureAltitude }} ft</p>
+        <p>ISA Temperature: {{ isaTemperature }} °C</p>
+        <p>ISA Deviation: {{ isaDeviation }} °C</p>
+
+        <div class="wind-info">
+            <p><span>Headwind:</span> {{ headwind.toFixed(2) }} kt</p>
+            <p v-bind:style=" tailwind > 0 ? 'color: red' : '' "><span
+                    v-bind:style=" tailwind > 0 ? 'color: red' : '' ">Tailwind:</span> {{ tailwind.toFixed(2) }} kt</p>
+            <p><span>Crosswind:</span> {{ Math.abs(crosswind).toFixed(2) }} kt ({{ crossWind > 0 ? "R" : "L" }})</p>
+        </div>
+
+        <!-- MTOW Input -->
+        <div class="input-group">
+            <label for="mtow">Aircraft Weight (MTOW in kg):</label>
+            <input v-model.number="mtow" type="number" placeholder="Enter weight" @blur="dataChange()">
+        </div>
+
+
+        <button :disabled="!(mtow => 880 && mtow <= 980)" v-if="!distanceCalculated" @click="calculateDistances">
+            Continue
+            Distances
+        </button>
+    </div>
+
+    <div v-if="distanceCalculated">
+        <h4>Runway:</h4>
+        <p>Total runway: {{ (selectedRunway.length_ft * 0.3048).toFixed(2) }} meters</p>
+        <p>Displaced threshold: {{ (selectedRunway.displaced_threshold_ft * 0.3048).toFixed(2) }} meters</p>
+        <p>Total without threshold:
+            {{ ((selectedRunway.length_ft - selectedRunway.displaced_threshold_ft) * 0.3048).toFixed(2) }} meters</p>
+    </div>
+
+    <div v-if="distanceCalculated">
+        <h4>Distances POH:</h4>
+        <p>Takeoff Distance to Liftoff: {{ takeOffMetersToLiftOff }} meters</p>
+        <p>Takeoff Distance to 50ft: {{ takeOffMetersTo50ft }} meters</p>
+        <p>Landing Distance: {{ landingMeters }} meters</p>
+        <p>Landing Distance to 15m: {{ landingMeters15m }} meters</p>
+    </div>
+
+    <div v-if="distanceCalculated">
+        <h4>Distances ATO:</h4>
+        <p>Takeoff Distance to Liftoff: {{ takeOffMetersToLiftOffAto }} meters</p>
+        <p>Takeoff Distance to 50ft: {{ takeOffMetersTo50ftAto }} meters</p>
+        <p>Landing Distance: {{ landingMetersAto }} meters</p>
+        <p>Landing Distance to 15m: {{ landingMeters15mAto }} meters</p>
+    </div>
+
+    <!-- Wind Information -->
+
+</div>
+
+<script>
+    const {createApp, nextTick} = Vue;
+
+    createApp({
+        data() {
+            return {
+                aircrafts: [
+                    {"id": "PH-NCD", "name": "PH-NCD - Robin DR40", "type": "DR40"},
+                    {"id": "PH-HLR", "name": "PH-HLR - Robin DR40", "type": "DR40"},
+                    {"id": "PH-NSC", "name": "PH-NSC - Robin DR40", "type": "DR40"},
+                    {"id": "PH-SPZ", "name": "PH-SPZ - Robin DR40", "type": "DR40"},
+                    {"id": "PH-SVN", "name": "PH-SVN - Robin R2160", "type": "R2160"},
+                    {"id": "PH-SVT", "name": "PH-SVT - Robin DR40", "type": "DR40"},
+                    {"id": "PH-SVU", "name": "PH-SVU - Robin DR40", "type": "DR40"},
+                    {"id": "PH-SVP", "name": "PH-SVP - Piper Archer III", "type": "ArcherIII"},
+                    {"id": "PH-VSY", "name": "PH-VSY - Piper Warrior", "type": "Warrior"},
+                    {"id": "PH-XYZ", "name": "PH-XYZ - Robin DR401", "type": "DR401"}
+                ],
+                airportCode: '',
+                runways: [],
+                selectedAircraft: null,
+                selectedRunway: null,
+                selectedAirport: null,
+                meteoCalculated: false,
+                distanceCalculated: false,
+                mtow: null,
+                runwayType: '',
+                runwayCondition: 'dry',
+                metar: null,
+                editableMetar: {},
+                densityAltitude: 0,
+                isaDeviation: 0,
+                isaTemperature: 0,
+                fieldElevation: 0,
+                apiKey: '48751567ee941c35c92610143f8e6d1b4e827c637cf069678b4f049e1e9ebe820b3dbcc594d54b7085bdb12c4b51d351',
+                weatherApiKey: 'ce89391ac9964a9bb00c685053',
+                takeOffMetersToLiftOff: 0,
+                takeOffMetersTo50ft: 0,
+                takeOffMetersToLiftOffAto: 0,
+                takeOffMetersTo50ftAto: 0,
+                landingMeters: 0,
+                landingMeters15m: 0,
+                landingMetersAto: 0,
+                landingMeters15mAto: 0,
+                headwind: 0,
+                tailwind: 0,
+                crosswind: 0
+            };
+        },
+        methods: {
+            setRunwayType() {
+                this.runwayType = this.selectedRunway.surface
+                this.dataChange();
+            },
+            async fetchAirportData() {
+                if (this.airportCode) {
+                    try {
+                        const airportResponse = await axios.get(`https://airportdb.io/api/v1/airport/${this.airportCode}?apiToken=${this.apiKey}`);
+                        this.selectedAirport = airportResponse.data;
+                        this.runways = [];
+
+                        // Split runways into individual directions
+                        airportResponse.data.runways.forEach(runway => {
+                            this.runways.push({
+                                id: runway.id + '-LE',
+                                ident: runway.le_ident,
+                                length_ft: runway.length_ft,
+                                displaced_threshold_ft: runway.le_displaced_threshold_ft,
+                                heading: runway.le_heading_degT === "" ? parseInt(runway.le_ident) * 10 : runway.le_heading_degT,
+                                surface: runway.surface
+                            });
+                            this.runways.push({
+                                id: runway.id + '-HE',
+                                ident: runway.he_ident,
+                                length_ft: runway.length_ft,
+                                displaced_threshold_ft: runway.he_displaced_threshold_ft,
+                                heading: runway.le_heading_degT === "" ? parseInt(runway.he_ident) * 10 : runway.he_heading_degT,
+                                surface: runway.surface
+                            });
+                        });
+
+                        // Fetch METAR data for the selected airport
+                        const metarResponse = await axios.get(`https://api.checkwx.com/metar/${this.airportCode}/nearest/decoded`, {
+                            headers: {
+                                'X-API-Key': this.weatherApiKey
+                            }
+                        });
+                        this.metar = metarResponse.data.data[0];
+                        this.editableMetar = {
+                            wind_direction: this.metar.wind.degrees || 0,
+                            wind_speed: this.metar.wind.speed_kts || 0,
+                            temperature: this.metar.temperature.celsius || 0,
+                            dewpoint: this.metar.dewpoint.celsius || 0,
+                            pressure: this.metar.barometer.hpa || 0
+                        };
+                        this.fieldElevation = this.selectedAirport.elevation_ft
+
+                        // Calculate density altitude and ISA deviation
+                        this.calculateDensityAltitude();
+
+                    } catch (error) {
+                        console.error('Error fetching airport or METAR data:', error);
+                        alert('Invalid ICAO code or unable to fetch data.');
+                        this.runways = [];
+                        this.metar = null;
+                    }
+                }
+            },
+            dataChange() {
+                if (this.distanceCalculated) {
+                    this.calculateMeteo();
+                    this.calculateDistances();
+                } else if (this.meteoCalculated) {
+                    this.calculateMeteo();
+                }
+            },
+            calculateDensityAltitude() {
+                this.calculateIsaDeviation();
+
+                const fieldElevation = this.fieldElevation || 0;
+                const pressureMb = parseFloat(this.editableMetar.pressure);
+                const oatTemperature = this.editableMetar.temperature;
+
+                // Pressure altitude formula
+                this.pressureAltitude = parseFloat(fieldElevation) + ((1013 - pressureMb) * 30); // Conversion factor for feet
+
+                this.densityAltitude = Math.round(this.pressureAltitude + (120 * (oatTemperature - this.isaTemperature)));
+            },
+            calculateIsaDeviation() {
+                const temperature = this.editableMetar.temperature;
+                const elevation = this.fieldElevation || 0;
+
+                const isaTemperature = 15 - (elevation / 1000) * 2;
+                this.isaTemperature = Math.round(isaTemperature);
+                this.isaDeviation = (temperature - this.isaTemperature);
+            },
+            interpolate(x, x0, x1, y0, y1) {
+                if (x0 === x1) return y0; // No interpolation needed if x0 equals x1
+                return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+            },
+
+            getTakeoffDistances(pressureAlt, isaDeviation, mtow) {
+                // Define the table data from the images as a JavaScript object
+                const takeoffData = {
+                    880: {
+                        isa: [0, 10, 20], // ISA deviation
+                        altitude: [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000], // Pressure altitude in ft
+                        distances: {
+                            toLiftOff: {
+                                0: [190, 210, 220],   // To lift-off distances at ISA deviation = 0°C, 10°C, 20°C for 880 kg
+                                1000: [200, 220, 230],
+                                2000: [210, 230, 250],
+                                3000: [220, 240, 260],
+                                4000: [240, 250, 270],
+                                5000: [250, 270, 290],
+                                6000: [270, 290, 310],
+                                7000: [290, 310, 330],
+                                8000: [310, 330, 350],
+                                9000: [330, 350, 370]
+                            },
+                            to50ft: {
+                                0: [350, 380, 410],   // To 50 ft height distances at ISA deviation = 0°C, 10°C, 20°C for 880 kg
+                                1000: [370, 390, 430],
+                                2000: [390, 410, 450],
+                                3000: [400, 430, 460],
+                                4000: [430, 460, 490],
+                                5000: [450, 480, 520],
+                                6000: [490, 520, 560],
+                                7000: [540, 570, 620],
+                                8000: [590, 620, 680],
+                                9000: [630, 660, 720]
+                            }
+                        }
+                    },
+                    980: {
+                        isa: [0, 10, 20], // ISA deviation
+                        altitude: [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000], // Pressure altitude in ft
+                        distances: {
+                            toLiftOff: {
+                                0: [240, 260, 280],   // To lift-off distances at ISA deviation = 0°C, 10°C, 20°C for 980 kg
+                                1000: [260, 270, 290],
+                                2000: [270, 290, 310],
+                                3000: [280, 300, 320],
+                                4000: [300, 320, 340],
+                                5000: [310, 330, 360],
+                                6000: [330, 350, 380],
+                                7000: [360, 380, 400],
+                                8000: [390, 410, 430],
+                                9000: [410, 430, 450]
+                            },
+                            to50ft: {
+                                0: [440, 480, 520],   // To 50 ft height distances at ISA deviation = 0°C, 10°C, 20°C for 980 kg
+                                1000: [470, 500, 540],
+                                2000: [490, 530, 570],
+                                3000: [510, 550, 590],
+                                4000: [540, 580, 630],
+                                5000: [580, 620, 670],
+                                6000: [620, 660, 720],
+                                7000: [690, 730, 790],
+                                8000: [760, 810, 880],
+                                9000: [810, 850, 930]
+                            }
+                        }
+                    }
+                };
+
+// Interpolation function
+
+
+                const mtows = [880, 980]; // Available MTOW values
+                let mtow0 = mtows[0], mtow1 = mtows[1];
+
+                // Cap MTOW within the available range
+                if (mtow < mtows[0]) {
+                    mtow = mtows[0];
+                } else if (mtow > mtows[1]) {
+                    mtow = mtows[1];
+                }
+
+                // Find the nearest MTOW values for interpolation
+                if (mtow !== mtows[0] && mtow !== mtows[1]) {
+                    mtow0 = mtows[0];
+                    mtow1 = mtows[1];
+                }
+
+                // Interpolate for the MTOW 880 and 980
+                const table880 = takeoffData[mtow0];
+                const table980 = takeoffData[mtow1];
+
+                // Find closest altitude values for interpolation
+                const altitudes = table880.altitude;
+                let alt0 = altitudes[0], alt1 = altitudes[altitudes.length - 1];
+
+                for (let i = 0; i < altitudes.length - 1; i++) {
+                    if (pressureAlt >= altitudes[i] && pressureAlt <= altitudes[i + 1]) {
+                        alt0 = altitudes[i];
+                        alt1 = altitudes[i + 1];
+                        break;
+                    }
+                }
+
+                // Cap pressure altitude within the available range
+                if (pressureAlt < altitudes[0]) {
+                    alt0 = alt1 = altitudes[0];
+                } else if (pressureAlt > altitudes[altitudes.length - 1]) {
+                    alt0 = alt1 = altitudes[altitudes.length - 1];
+                }
+
+                // Find closest ISA deviation values for interpolation
+                const isaDeviations = table880.isa;
+                let isa0 = isaDeviations[0], isa1 = isaDeviations[isaDeviations.length - 1];
+
+                for (let i = 0; i < isaDeviations.length - 1; i++) {
+                    if (isaDeviation >= isaDeviations[i] && isaDeviation <= isaDeviations[i + 1]) {
+                        isa0 = isaDeviations[i];
+                        isa1 = isaDeviations[i + 1];
+                        break;
+                    }
+                }
+
+                // Cap ISA deviation within the available range
+                if (isaDeviation < isaDeviations[0]) {
+                    isa0 = isa1 = isaDeviations[0];
+                } else if (isaDeviation > isaDeviations[isaDeviations.length - 1]) {
+                    isa0 = isa1 = isaDeviations[isaDeviations.length - 1];
+                }
+
+                // Get the distances for both MTOW tables (880 kg and 980 kg)
+                const getInterpolatedDistances = (table) => {
+                    // Get values for "To lift-off"
+                    const distAlt0Isa0LiftOff = table.distances.toLiftOff[alt0][table.isa.indexOf(isa0)];
+                    const distAlt0Isa1LiftOff = table.distances.toLiftOff[alt0][table.isa.indexOf(isa1)];
+                    const distAlt1Isa0LiftOff = table.distances.toLiftOff[alt1][table.isa.indexOf(isa0)];
+                    const distAlt1Isa1LiftOff = table.distances.toLiftOff[alt1][table.isa.indexOf(isa1)];
+
+                    // Get values for "To 50 ft"
+                    const distAlt0Isa0To50 = table.distances.to50ft[alt0][table.isa.indexOf(isa0)];
+                    const distAlt0Isa1To50 = table.distances.to50ft[alt0][table.isa.indexOf(isa1)];
+                    const distAlt1Isa0To50 = table.distances.to50ft[alt1][table.isa.indexOf(isa0)];
+                    const distAlt1Isa1To50 = table.distances.to50ft[alt1][table.isa.indexOf(isa1)];
+
+                    // Interpolate based on ISA deviation for both altitudes
+                    const distAlt0LiftOff = this.interpolate(isaDeviation, isa0, isa1, distAlt0Isa0LiftOff, distAlt0Isa1LiftOff);
+                    const distAlt1LiftOff = this.interpolate(isaDeviation, isa0, isa1, distAlt1Isa0LiftOff, distAlt1Isa1LiftOff);
+                    const distAlt0To50 = this.interpolate(isaDeviation, isa0, isa1, distAlt0Isa0To50, distAlt0Isa1To50);
+                    const distAlt1To50 = this.interpolate(isaDeviation, isa0, isa1, distAlt1Isa0To50, distAlt1Isa1To50);
+
+                    return {
+                        liftOff: this.interpolate(pressureAlt, alt0, alt1, distAlt0LiftOff, distAlt1LiftOff),
+                        to50ft: this.interpolate(pressureAlt, alt0, alt1, distAlt0To50, distAlt1To50)
+                    };
+                };
+
+                // Get interpolated distances for both MTOWs
+                const result880 = getInterpolatedDistances(table880);
+                const result980 = getInterpolatedDistances(table980);
+
+                // Interpolate the result based on MTOW
+                const liftOffFinal = this.interpolate(mtow, mtow0, mtow1, result880.liftOff, result980.liftOff);
+                const to50ftFinal = this.interpolate(mtow, mtow0, mtow1, result880.to50ft, result980.to50ft);
+
+                return [liftOffFinal, to50ftFinal];
+
+
+            },
+
+            getLandingDistance(altitude, temperature, mtow = 980) {
+                const landingData = {
+                    980: { // For MTOW of 980 kg
+                        altitude: [0, 2000, 3000, 4000], // Altitude in ft
+                        temperature: {
+                            0: [-5, 15, 35],   // Temperature at 0 ft (°C)
+                            2000: [-9, 11, 31],   // Temperature at 2000 ft (°C)
+                            3000: [-11, 9, 29],   // Temperature at 3000 ft (°C)
+                            4000: [-13, 7, 27]    // Temperature at 4000 ft (°C)
+                        },
+                        distances: {
+                            groundTouch: {
+                                0: [266, 282, 298],   // Ground touch distances at 0 ft (for temperatures -5°C, 15°C, 35°C)
+                                2000: [277, 294, 310],   // Ground touch distances at 2000 ft (for temperatures -9°C, 11°C, 31°C)
+                                3000: [284, 301, 318],   // Ground touch distances at 3000 ft (for temperatures -11°C, 9°C, 29°C)
+                                4000: [291, 308, 326]    // Ground touch distances at 4000 ft (for temperatures -13°C, 7°C, 27°C)
+                            },
+                            from50ft: {
+                                0: [479, 507, 535],   // Landing distance from 50 ft at 0 ft (for temperatures -5°C, 15°C, 35°C)
+                                2000: [498, 528, 558],   // Landing distance from 50 ft at 2000 ft (for temperatures -9°C, 11°C, 31°C)
+                                3000: [510, 541, 572],   // Landing distance from 50 ft at 3000 ft (for temperatures -11°C, 9°C, 29°C)
+                                4000: [527, 559, 591]    // Landing distance from 50 ft at 4000 ft (for temperatures -13°C, 7°C, 27°C)
+                            }
+                        }
+                    }
+                };
+
+// Interpolation function
+
+
+// Main function to calculate both landing distances
+                const mtows = [980]; // Available MTOW values (for future flexibility)
+                let mtow0 = mtows[0], mtow1 = mtows[0]; // Currently only one MTOW
+
+                // Ensure MTOW is capped within the available range
+                if (mtow !== mtows[0]) {
+                    mtow = mtows[0]; // Default to 980 kg for now
+                }
+
+                // Interpolate for the MTOW 980
+                const table980 = landingData[mtow];
+
+                // Find closest altitude values for interpolation
+                const altitudes = table980.altitude;
+                let alt0 = altitudes[0], alt1 = altitudes[altitudes.length - 1];
+
+                for (let i = 0; i < altitudes.length - 1; i++) {
+                    if (altitude >= altitudes[i] && altitude <= altitudes[i + 1]) {
+                        alt0 = altitudes[i];
+                        alt1 = altitudes[i + 1];
+                        break;
+                    }
+                }
+
+                // Cap altitude within the available range
+                if (altitude < altitudes[0]) {
+                    alt0 = alt1 = altitudes[0];
+                } else if (altitude > altitudes[altitudes.length - 1]) {
+                    alt0 = alt1 = altitudes[altitudes.length - 1];
+                }
+
+                // Find closest temperature values for interpolation
+                const temp0 = table980.temperature[alt0][0],
+                    temp1 = table980.temperature[alt0][table980.temperature[alt0].length - 1];
+                let t0, t1;
+
+                for (let i = 0; i < table980.temperature[alt0].length - 1; i++) {
+                    if (temperature >= table980.temperature[alt0][i] && temperature <= table980.temperature[alt0][i + 1]) {
+                        t0 = table980.temperature[alt0][i];
+                        t1 = table980.temperature[alt0][i + 1];
+                        break;
+                    }
+                }
+
+                // Cap temperature within the available range
+                if (temperature < temp0) {
+                    t0 = t1 = temp0;
+                } else if (temperature > temp1) {
+                    t0 = t1 = temp1;
+                }
+
+                // Get the distances for both altitude points
+                const getInterpolatedDistances = (table, alt) => {
+                    const distGround0 = table.distances.groundTouch[alt0][table.temperature[alt0].indexOf(t0)];
+                    const distGround1 = table.distances.groundTouch[alt0][table.temperature[alt0].indexOf(t1)];
+
+                    const dist50ft0 = table.distances.from50ft[alt0][table.temperature[alt0].indexOf(t0)];
+                    const dist50ft1 = table.distances.from50ft[alt0][table.temperature[alt0].indexOf(t1)];
+
+                    const distGround = this.interpolate(temperature, t0, t1, distGround0, distGround1);
+                    const dist50ft = this.interpolate(temperature, t0, t1, dist50ft0, dist50ft1);
+
+                    return {
+                        groundTouch: distGround,
+                        from50ft: dist50ft
+                    };
+                };
+
+                // Interpolate the result based on altitude
+                const resultAlt0 = getInterpolatedDistances(table980, alt0);
+                const resultAlt1 = getInterpolatedDistances(table980, alt1);
+
+                const finalGroundTouch = this.interpolate(altitude, alt0, alt1, resultAlt0.groundTouch, resultAlt1.groundTouch);
+                const finalFrom50ft = this.interpolate(altitude, alt0, alt1, resultAlt0.from50ft, resultAlt1.from50ft);
+
+                return [finalGroundTouch, finalFrom50ft];
+            },
+
+            getHeadwindFactorRobin(headwind) {
+                const windSpeeds = [0, 10, 20, 30]; // Wind speeds we have multipliers for
+                const multipliers = [1, 0.85, 0.65, 0.55]; // Corresponding multipliers
+
+                if (headwind <= 0) return 1; // No headwind, no reduction
+
+                // If headwind exceeds 30 kt, we assume the 30 kt multiplier
+                if (headwind >= 30) return 0.55;
+
+                // Interpolate the headwind factor for values between 10, 20, and 30 kt
+                for (let i = 0; i < windSpeeds.length - 1; i++) {
+                    if (headwind >= windSpeeds[i] && headwind <= windSpeeds[i + 1]) {
+                        return this.interpolate(headwind, windSpeeds[i], windSpeeds[i + 1], multipliers[i], multipliers[i + 1]);
+                    }
+                }
+
+                return 1; // Default fallback
+            },
+            calculateDistances() {
+
+                const toDistanceData = this.getTakeoffDistances(this.pressureAltitude, this.isaDeviation, this.mtow)
+                const landDistanceData = this.getLandingDistance(this.fieldElevation, this.editableMetar.temperature, this.mtow)
+
+                this.takeOffMetersToLiftOff = toDistanceData[0];
+                this.takeOffMetersTo50ft = toDistanceData[1];
+
+                this.landingMeters = landDistanceData[0];
+                this.landingMeters15m = landDistanceData[1];
+
+                if (this.selectedAircraft.type === "DR40") {
+                    if (this.runwayCondition === 'dry' && (this.runwayType === "GRS" || this.runwayType === 'grass')) {
+                        //POH waardes
+                        this.takeOffMetersToLiftOff *= 1.15;
+                        this.takeOffMetersTo50ft *= 1.15;
+                        this.landingMeters *= 1.15;
+                        this.landingMeters15m *= 1.15;
+                    }
+                    if (this.headwind > 0) {
+                        this.takeoffMetersToLiftOff *= this.getHeadwindFactorRobin(this.headwind);
+                        this.takeoffMetersTo50ft *= this.getHeadwindFactorRobin(this.headwind);
+
+                        this.landingMeters *= this.getHeadwindFactorRobin(this.headwind);
+                        this.landingMeters15m *= this.getHeadwindFactorRobin(this.headwind);
+                    }
+                    if (this.tailwind > 0) {
+                        this.takeoffMetersToLiftOff *= 1 + ((this.tailwind / 2) * 0.1);
+                        this.takeoffMetersTo50ft *= 1 + ((this.tailwind / 2) * 0.1);
+
+                        this.landingMeters *= 1 + ((this.tailwind / 2) * 0.1);
+                        this.landingMeters15m *= 1 + ((this.tailwind / 2) * 0.1);
+                    }
+
+                    this.takeOffMetersToLiftOffAto = this.takeOffMetersToLiftOff;
+                    this.takeOffMetersTo50ftAto = this.takeOffMetersTo50ft;
+
+                    this.landingMetersAto = this.landingMeters;
+                    this.landingMeters15mAto = this.landingMeters15m;
+
+                    if (this.runwayCondition === 'wet' && (this.runwayType === "GRS" || this.runwayType === 'grass')) {
+                        this.takeOffMetersToLiftOffAto *= 1.20;
+                        this.takeOffMetersTo50ftAto *= 1.20;
+                        this.landingMetersAto *= 1.38;
+                        this.landingMeters15mAto *= 1.38
+                    } else if (this.runwayCondition === 'wet') {
+                        this.landingMetersAto *= 1.15;
+                        this.landingMeters15mAto *= 1.15;
+                    }
+                }
+
+                this.takeOffMetersToLiftOffAto *= 1.25;
+                this.takeOffMetersTo50ftAto *= 1.25;
+                this.landingMetersAto *= 1.43;
+                this.landingMeters15mAto *= 1.43;
+
+                this.takeOffMetersToLiftOff = this.takeOffMetersToLiftOff.toFixed(2);
+                this.takeOffMetersTo50ft = this.takeOffMetersTo50ft.toFixed(2);
+                this.takeOffMetersToLiftOffAto = this.takeOffMetersToLiftOffAto.toFixed(2);
+                this.takeOffMetersTo50ftAto = this.takeOffMetersTo50ftAto.toFixed(2);
+
+                this.landingMeters = this.landingMeters.toFixed(2);
+                this.landingMeters15m = this.landingMeters15m.toFixed(2);
+                this.landingMetersAto = this.landingMetersAto.toFixed(2);
+                this.landingMeters15mAto = this.landingMeters15mAto.toFixed(2);
+
+                this.distanceCalculated = true;
+            },
+            calculateMeteo() {
+                this.calculateDensityAltitude()
+                const windAngle = this.editableMetar.wind_direction;
+                const windSpeed = this.editableMetar.wind_speed;
+                const runwayHeading = this.selectedRunway.heading;
+
+                const angleDifference = this.degToRad(windAngle - runwayHeading);
+                const headwind = Math.cos(angleDifference) * windSpeed;
+                const crosswind = Math.sin(angleDifference) * windSpeed;
+
+                this.tailwind = headwind < 0 ? -headwind : 0;
+                this.headwind = headwind > 0 ? headwind : 0;
+                this.crosswind = crosswind;
+
+                this.meteoCalculated = true;
+            },
+            degToRad(deg) {
+                return deg * (Math.PI / 180);
+            }
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>

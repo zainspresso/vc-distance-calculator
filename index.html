@@ -2,10 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>Aircraft Landing Distance Calculator</title>
     <script src="https://unpkg.com/vue"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css"
+          integrity="sha384-xOolHFLEh07PJGoPkLv1IbcEPTNtaed2xpHsD9ESMhqIYd0nLMwNLD69Npy4HI+N" rel="stylesheet">
+
+
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -62,61 +66,79 @@
     </style>
 </head>
 <body>
-<div id="app" class="container">
-    <h2>Aircraft Landing Distance Calculator</h2>
+<div class="container" id="app">
+    <h2>Vliegclub Rotterdam Landing Distance Calculator</h2>
 
     <!-- Aircraft Selection -->
     <div class="input-group">
         <label for="aircraft">Select Aircraft:</label>
         <select v-model="selectedAircraft">
-            <option v-for="aircraft in aircrafts" :key="aircraft.id" :value="aircraft"
-                    :disabled="aircraft.type !== 'DR40'">{{ aircraft.name }}
+            <option :disabled="aircraft.type !== 'DR40'" :key="aircraft.id" :value="aircraft"
+                    v-for="aircraft in aircrafts">{{ aircraft.name }}
             </option>
         </select>
     </div>
+    <div class="flex-container">
+        <div class="flex-item">
 
+            <!-- Airport Input -->
+            <div class="input-group">
+                <label for="airport">Enter Airport ICAO Code:</label>
+                <input :disabled="selectedAircraft === null" @blur="fetchAirportData"
+                       @keyup="this.airportCode = this.airportCode.toUpperCase()"
+                       placeholder="EHRD" v-model="airportCode"
+                >
+            </div>
+        </div>
+        <div class="flex-item">
 
-    <!-- Airport Input -->
-    <div class="input-group">
-        <label for="airport">Enter Airport ICAO Code:</label>
-        <input v-model="airportCode" placeholder="ICAO" @blur="fetchAirportData">
+            <div class="input-group" v-if="runways.length > 0">
+                <label for="airport">Field elevation (ft):</label>
+                <input @blur="dataChange()" @change="dataChange()" placeholder="ft" v-model="fieldElevation">
+            </div>
+        </div>
     </div>
-
-    <div class="input-group" v-if="runways.length > 0">
-        <label for="airport">Field elevation (ft):</label>
-        <input v-model="fieldElevation" placeholder="ft" @blur="dataChange()">
-    </div>
-
     <!-- Runways Display -->
     <div class="input-group" v-if="runways.length > 0">
-        <label for="runway">Select Runway:</label>
-        <select v-model="selectedRunway" class="flex-item" @change="setRunwayType()" @blur="dataChange()">
-            <option v-for="runway in runways" :key="runway.id" :value="runway">{{ runway.ident }} -
-                {{ (runway.length_ft * 0.3048).toFixed(2) }} m
-            </option>
-        </select>
+        <div class="flex-container">
+            <div class="flex-item">
+                <label for="runway">Select Runway:</label>
+                <select @blur="dataChange()" @change="setRunwayType() && dataChange()" class="flex-item"
+                        v-model="selectedRunway">
+                    <option :key="runway.id" :value="runway" v-for="runway in runways">{{ runway.ident }} -
+                        {{ (runway.length_m) }} m
+                    </option>
+                </select>
+            </div>
 
-        <!-- Runway Type -->
-        <label for="runwayType">Runway Type:</label>
-        <select v-model="runwayType" class="flex-item" @blur="dataChange()">
-            <option value="ASP">Asphalt</option>
-            <option value="BIT">Bituminous asphalt or tarmac</option>
-            <option value="COM">Composite</option>
-            <option value="CON">Concrete</option>
-            <option value="COP">Composite</option>
-            <option value="GRE">Graded or rolled earth, grass on graded earth</option>
-            <option value="GRS">Grass or earth not graded or rolled</option>
-            <option value="grass">Grass</option>
-            <option value="GVL">Gravel</option>
-            <option value="SAN">Sand</option>
-        </select>
+            <!-- Runway Type -->
+            <div class="flex-item">
 
-        <!-- Runway Condition -->
-        <label for="runwayCondition">Runway Condition:</label>
-        <select v-model="runwayCondition" class="flex-item" @blur="dataChange()">
-            <option value="dry">Dry</option>
-            <option value="wet">Wet</option>
-        </select>
+                <label for="runwayType">Runway Type:</label>
+                <select @blur="dataChange()" @change="dataChange()" class="flex-item" v-model="runwayType">
+                    <option value="ASP">Asphalt</option>
+                    <option value="BIT">Bituminous asphalt or tarmac</option>
+                    <option value="COM">Composite</option>
+                    <option value="CON">Concrete</option>
+                    <option value="COP">Composite</option>
+                    <option value="GRE">Graded or rolled earth, grass on graded earth</option>
+                    <option value="GRS">Grass or earth not graded or rolled</option>
+                    <option value="grass">Grass</option>
+                    <option value="GVL">Gravel</option>
+                    <option value="SAN">Sand</option>
+                </select>
+            </div>
+            <div class="flex-item">
+
+                <!-- Runway Condition -->
+                <label for="runwayCondition">Runway Condition:</label>
+                <select @blur="dataChange()" @change="dataChange()" class="flex-item" v-model="runwayCondition">
+                    <option value="dry">Dry</option>
+                    <option value="wet">Wet</option>
+                </select>
+            </div>
+
+        </div>
     </div>
 
     <!-- METAR Weather Info and Editable Fields -->
@@ -125,78 +147,179 @@
         <div class="flex-container">
             <div class="flex-item">
                 <label>Wind Direction (°)</label>
-                <input v-model.number="editableMetar.wind_direction" type="number" @blur="dataChange()">
+                <input @blur="dataChange()" @change="dataChange()" type="number"
+                       v-model.number="editableMetar.wind_direction">
             </div>
             <div class="flex-item">
                 <label>Wind Speed (kt)</label>
-                <input v-model.number="editableMetar.wind_speed" type="number" @blur="dataChange()">
+                <input @blur="dataChange()" @change="dataChange()" type="number"
+                       v-model.number="editableMetar.wind_speed">
             </div>
             <div class="flex-item">
                 <label>Temperature (°C)</label>
-                <input v-model.number="editableMetar.temperature" type="number" @blur="dataChange()">
-            </div>
-            <div class="flex-item">
-                <label>Dewpoint (°C)</label>
-                <input v-model.number="editableMetar.dewpoint" type="number" @blur="dataChange()">
+                <input @blur="dataChange()" @change="dataChange()" type="number"
+                       v-model.number="editableMetar.temperature">
             </div>
             <div class="flex-item">
                 <label>Pressure (hPa)</label>
-                <input v-model.number="editableMetar.pressure" type="number" @blur="dataChange()">
+                <input @blur="dataChange()" @change="dataChange()" type="number"
+                       v-model.number="editableMetar.pressure">
             </div>
         </div>
-        <button v-if="selectedRunway && !meteoCalculated" @click="calculateMeteo">Continue</button>
+        <button @click="calculateMeteo" v-if="selectedRunway && !meteoCalculated">Continue</button>
     </div>
 
     <!-- Density Altitude and ISA Deviation -->
-    <div class="input-group" v-if="meteoCalculated">
-        <h4>Calculations:</h4>
-        <p>Density Altitude: {{ densityAltitude }} ft</p>
-        <p>Pressure Altitude: {{ pressureAltitude }} ft</p>
-        <p>ISA Temperature: {{ isaTemperature }} °C</p>
-        <p>ISA Deviation: {{ isaDeviation }} °C</p>
+    <div v-if="meteoCalculated">
+        <h4>Pre-calculations</h4><br>
+        <div class="row">
+            <div class="col-6">
+                <table class="table">
+                    <tr>
+                        <td>Density Altitude</td>
+                        <td>{{ densityAltitude }} ft</td>
+                    </tr>
+                    <tr>
+                        <td>Pressure Altitude</td>
+                        <td>{{ pressureAltitude }} ft</td>
+                    </tr>
+                    <tr>
+                        <td>ISA Temperature</td>
+                        <td>{{ isaTemperature }} °C</td>
+                    </tr>
+                    <tr>
+                        <td>ISA Deviation</td>
+                        <td>{{ isaDeviation }} °C</td>
+                    </tr>
+                </table>
+            </div>
+            <div class="col-6">
+                <table class="table">
 
-        <div class="wind-info">
-            <p><span>Headwind:</span> {{ headwind.toFixed(2) }} kt</p>
-            <p v-bind:style=" tailwind > 0 ? 'color: red' : '' "><span
-                    v-bind:style=" tailwind > 0 ? 'color: red' : '' ">Tailwind:</span> {{ tailwind.toFixed(2) }} kt</p>
-            <p><span>Crosswind:</span> {{ Math.abs(crosswind).toFixed(2) }} kt ({{ crossWind > 0 ? "R" : "L" }})</p>
+                    <tr>
+                        <td>Headwind</td>
+                        <td>{{ headwind.toFixed(2) }} kt</td>
+                    </tr>
+                    <tr v-bind:style=" tailwind > 0 ? 'color: red' : '' ">
+                        <td v-bind:style=" tailwind > 0 ? 'color: red' : '' ">Tailwind</td>
+                        <td>{{ tailwind.toFixed(2) }} kt</td>
+                    </tr>
+                    <tr>
+                        <td>Crosswind</td>
+                        <td>{{ Math.abs(crosswind).toFixed(2) }} kt ({{ crossWind > 0 ? "R" : "L" }})</td>
+                    </tr>
+                </table>
+
+            </div>
         </div>
 
-        <!-- MTOW Input -->
-        <div class="input-group">
-            <label for="mtow">Aircraft Weight (MTOW in kg):</label>
-            <input v-model.number="mtow" type="number" placeholder="Enter weight" @blur="dataChange()">
+        <br>
+        <div class="flex-container">
+            <div class="flex-item">
+                <div class="input-group">
+                    <label for="mtow">Aircraft Weight (MTOW in kg):</label>
+                    <input @blur="dataChange()" @change="dataChange()" placeholder="980" type="number"
+                           v-model.number="mtow">
+                </div>
+            </div>
+            <div class="flex-item">
+                <div class="input-group">
+                    <label for="lda">LDA (meters):</label>
+                    <input @blur="dataChange()" @change="dataChange()" placeholder="Meters" type="number"
+                           v-model.number="lda">
+                </div>
+            </div>
+            <div class="flex-item">
+                <div class="input-group">
+                    <label for="toda">TODA (meters):</label>
+                    <input @blur="dataChange()" @change="dataChange()" placeholder="Meters" type="number"
+                           v-model.number="toda">
+                </div>
+            </div>
         </div>
 
 
-        <button :disabled="!(mtow => 880 && mtow <= 980)" v-if="!distanceCalculated" @click="calculateDistances">
+        <button :disabled="!(mtow => 880 && mtow <= 980)" @click="calculateDistances" v-if="!distanceCalculated">
             Continue
-            Distances
         </button>
     </div>
 
     <div v-if="distanceCalculated">
-        <h4>Runway:</h4>
-        <p>Total runway: {{ (selectedRunway.length_ft * 0.3048).toFixed(2) }} meters</p>
-        <p>Displaced threshold: {{ (selectedRunway.displaced_threshold_ft * 0.3048).toFixed(2) }} meters</p>
-        <p>Total without threshold:
-            {{ ((selectedRunway.length_ft - selectedRunway.displaced_threshold_ft) * 0.3048).toFixed(2) }} meters</p>
-    </div>
 
-    <div v-if="distanceCalculated">
-        <h4>Distances POH:</h4>
-        <p>Takeoff Distance to Liftoff: {{ takeOffMetersToLiftOff }} meters</p>
-        <p>Takeoff Distance to 50ft: {{ takeOffMetersTo50ft }} meters</p>
-        <p>Landing Distance: {{ landingMeters }} meters</p>
-        <p>Landing Distance to 15m: {{ landingMeters15m }} meters</p>
-    </div>
-
-    <div v-if="distanceCalculated">
-        <h4>Distances ATO:</h4>
-        <p>Takeoff Distance to Liftoff: {{ takeOffMetersToLiftOffAto }} meters</p>
-        <p>Takeoff Distance to 50ft: {{ takeOffMetersTo50ftAto }} meters</p>
-        <p>Landing Distance: {{ landingMetersAto }} meters</p>
-        <p>Landing Distance to 15m: {{ landingMeters15mAto }} meters</p>
+        <h4>Distances</h4>
+        <table class="table">
+            <thead>
+            <tr>
+                <td>&nbsp;</td>
+                <td>POH</td>
+                <td>ATO</td>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>
+                    Takeoff Distance to Liftoff
+                </td>
+                <td>
+                    {{ takeOffMetersToLiftOff }} m
+                    <span
+                            :style="{color: getPercentage(takeOffMetersToLiftOff, toda) > 100 ? 'red' : 'green'}">
+                    ({{ getPercentage(takeOffMetersToLiftOff, toda)}}%)
+                </span>
+                </td>
+                <td>{{ takeOffMetersToLiftOffAto }} m <span
+                        :style="{color: getPercentage(takeOffMetersToLiftOffAto, toda) > 100 ? 'red' : 'green'}">
+                    ({{ getPercentage(takeOffMetersToLiftOffAto, toda)}}%)
+                </span>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    Takeoff Distance to 50ft
+                </td>
+                <td>{{ takeOffMetersTo50ft }} m <span
+                        :style="{color: getPercentage(takeOffMetersTo50ft, toda) > 100 ? 'red' : 'green'}">
+                    ({{ getPercentage(takeOffMetersTo50ft, toda)}}%)
+                </span>
+                </td>
+                <td>{{ takeOffMetersTo50ftAto }} m <span
+                        :style="{color: getPercentage(takeOffMetersTo50ftAto, toda) > 100 ? 'red' : 'green'}">
+                    ({{ getPercentage(takeOffMetersTo50ftAto, toda)}}%)
+                </span>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    Landing distance
+                </td>
+                <td>{{ landingMeters }} m <span
+                        :style="{color: getPercentage(landingMeters, lda) > 100 ? 'red' : 'green'}">
+                    ({{ getPercentage(landingMeters, lda)}}%)
+                </span>
+                </td>
+                <td>{{ landingMetersAto }} m <span
+                        :style="{color: getPercentage(landingMetersAto, lda) > 100 ? 'red' : 'green'}">
+                    ({{ getPercentage(landingMetersAto, lda)}}%)
+                </span>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    Landing distance to 15m
+                </td>
+                <td>{{ landingMeters15m }} m <span
+                        :style="{color: getPercentage(landingMeters15m, lda) > 100 ? 'red' : 'green'}">
+                    ({{ getPercentage(landingMeters15m, lda)}}%)
+                </span>
+                </td>
+                <td>{{ landingMeters15mAto }} m <span
+                        :style="{color: getPercentage(landingMeters15mAto, lda) > 100 ? 'red' : 'green'}">
+                    ({{ getPercentage(landingMeters15mAto, lda)}}%)
+                </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
     </div>
 
     <!-- Wind Information -->
@@ -229,6 +352,8 @@
                 meteoCalculated: false,
                 distanceCalculated: false,
                 mtow: null,
+                lda: null,
+                toda: null,
                 runwayType: '',
                 runwayCondition: 'dry',
                 metar: null,
@@ -255,6 +380,8 @@
         methods: {
             setRunwayType() {
                 this.runwayType = this.selectedRunway.surface
+                this.lda = (this.selectedRunway.length_m - this.selectedRunway.displaced_threshold_m).toFixed(2)
+                this.toda = this.selectedRunway.length_m
                 this.dataChange();
             },
             async fetchAirportData() {
@@ -270,7 +397,9 @@
                                 id: runway.id + '-LE',
                                 ident: runway.le_ident,
                                 length_ft: runway.length_ft,
+                                length_m: (runway.length_ft * 0.3048).toFixed(2),
                                 displaced_threshold_ft: runway.le_displaced_threshold_ft,
+                                displaced_threshold_m: (runway.le_displaced_threshold_ft * 0.3048).toFixed(2),
                                 heading: runway.le_heading_degT === "" ? parseInt(runway.le_ident) * 10 : runway.le_heading_degT,
                                 surface: runway.surface
                             });
@@ -278,7 +407,9 @@
                                 id: runway.id + '-HE',
                                 ident: runway.he_ident,
                                 length_ft: runway.length_ft,
+                                length_m: (runway.length_ft * 0.3048).toFixed(2),
                                 displaced_threshold_ft: runway.he_displaced_threshold_ft,
+                                displaced_threshold_m: (runway.he_displaced_threshold_ft * 0.3048).toFixed(2),
                                 heading: runway.le_heading_degT === "" ? parseInt(runway.he_ident) * 10 : runway.he_heading_degT,
                                 surface: runway.surface
                             });
@@ -292,8 +423,8 @@
                         });
                         this.metar = metarResponse.data.data[0];
                         this.editableMetar = {
-                            wind_direction: this.metar.wind.degrees || 0,
-                            wind_speed: this.metar.wind.speed_kts || 0,
+                            wind_direction: this.metar.wind?.degrees || 0,
+                            wind_speed: this.metar.wind?.speed_kts || 0,
                             temperature: this.metar.temperature.celsius || 0,
                             dewpoint: this.metar.dewpoint.celsius || 0,
                             pressure: this.metar.barometer.hpa || 0
@@ -310,6 +441,9 @@
                         this.metar = null;
                     }
                 }
+            },
+            getPercentage(value, limit) {
+                return ((value / limit) * 100).toFixed(1)
             },
             dataChange() {
                 if (this.distanceCalculated) {
@@ -724,6 +858,13 @@
             }
         }
     }).mount('#app');
+
+    Vue.directive("uppercase", {
+        update: function (el) {
+            el.value = el.value.toUpperCase()
+        }
+    })
+
 </script>
 </body>
 </html>
